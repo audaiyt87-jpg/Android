@@ -73,16 +73,25 @@ def A(**kw):
 
 # ---------- تخزين البيانات ----------
 def data_dir():
+    d = None
     try:
         from android.storage import app_storage_path  # noqa
         d = app_storage_path()
     except Exception:
+        d = None
+    if not d:
         d = os.path.join(os.path.expanduser("~"), ".gold_portfolio")
-    os.makedirs(d, exist_ok=True)
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        d = "."
     return d
 
 
-DATA_FILE = os.path.join(data_dir(), "gold_portfolio_data.json")
+try:
+    DATA_FILE = os.path.join(data_dir(), "gold_portfolio_data.json")
+except Exception:
+    DATA_FILE = "gold_portfolio_data.json"
 
 # أسعار الصرف التقريبية مقابل الريال السعودي (العملة الأساس)
 CURRENCIES = {"SAR": 1.0, "USD": 0.2667, "AED": 0.9793}
@@ -185,6 +194,32 @@ def btn(text, cb, bg=GOLD, **kw):
 
 class GoldApp(App):
     def build(self):
+        # شبكة أمان: إن فشل بناء الواجهة نعرض الخطأ على الشاشة
+        # بدل أن يُغلق التطبيق (شاشة سوداء + تكرار).
+        try:
+            return self._build_ui()
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            try:
+                with open(os.path.join(data_dir(), "last_crash.txt"), "w",
+                          encoding="utf-8") as f:
+                    f.write(tb)
+            except Exception:
+                pass
+            print("GOLD_APP_CRASH:\n" + tb)
+            # شاشة خطأ بخط افتراضي (بدون الخط العربي) لتظهر دائماً
+            Window.clearcolor = (0, 0, 0, 1)
+            sc = ScrollView()
+            msg = Label(text="APP ERROR:\n\n" + tb, color=(1, 0.5, 0.5, 1),
+                        font_size="12sp", size_hint_y=None, halign="left",
+                        valign="top", padding=(dp(10), dp(10)))
+            msg.bind(texture_size=lambda w, v: setattr(w, "height", v[1]),
+                     width=lambda w, v: setattr(w, "text_size", (v, None)))
+            sc.add_widget(msg)
+            return sc
+
+    def _build_ui(self):
         self.title = "Gold Portfolio"
         Window.clearcolor = DARK
         self.s = load_state()
