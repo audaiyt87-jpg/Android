@@ -186,8 +186,8 @@ def lbl(text, **kw):
 
 def btn(text, cb, bg=GOLD, **kw):
     kw = A(**kw)
-    b = Button(text=ar(text), background_normal="", background_color=bg,
-               color=(0, 0, 0, 1) if bg == GOLD else (1, 1, 1, 1), **kw)
+    kw.setdefault("color", (0, 0, 0, 1) if bg == GOLD else (1, 1, 1, 1))
+    b = Button(text=ar(text), background_normal="", background_color=bg, **kw)
     b.bind(on_release=cb)
     return b
 
