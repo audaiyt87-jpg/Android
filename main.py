@@ -25,7 +25,8 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.spinner import Spinner
 from kivy.uix.popup import Popup
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Line, Rectangle
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.graphics import Color, Line, Rectangle, RoundedRectangle
 
 # ---------- دعم النص العربي (تشكيل + اتجاه) ----------
 try:
@@ -172,24 +173,80 @@ class PriceChart(Widget):
             Line(points=line, width=1.6)
 
 
-GOLD = (0.83, 0.68, 0.21, 1)
-DARK = (0.09, 0.09, 0.11, 1)
-GREEN = (0.15, 0.6, 0.3, 1)
-RED = (0.7, 0.2, 0.2, 1)
+GOLD = (0.902, 0.700, 0.133, 1)      # ذهبي
+GOLD_D = (0.72, 0.54, 0.07, 1)
+BG = (0.055, 0.063, 0.086, 1)        # خلفية داكنة
+DARK = BG
+CARD = (0.102, 0.118, 0.153, 1)      # بطاقة
+CARD2 = (0.137, 0.157, 0.200, 1)
+GREEN = (0.180, 0.800, 0.443, 1)
+RED = (0.906, 0.298, 0.235, 1)
+BLUE = (0.204, 0.596, 0.859, 1)
+TEXT = (0.945, 0.953, 0.965, 1)
+MUTE = (0.611, 0.639, 0.690, 1)
+
+
+class Card(BoxLayout):
+    """حاوية بخلفية مستديرة الزوايا."""
+    def __init__(self, bg=CARD, radius=16, **kw):
+        super().__init__(**kw)
+        with self.canvas.before:
+            self._col = Color(*bg)
+            self._rect = RoundedRectangle(radius=[radius])
+        self.bind(pos=self._upd, size=self._upd)
+
+    def _upd(self, *a):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+
+class RoundButton(ButtonBehavior, Label):
+    """زر بزوايا مستديرة."""
+    def __init__(self, bg=GOLD, radius=14, **kw):
+        super().__init__(**kw)
+        self._bg = bg
+        with self.canvas.before:
+            self._col = Color(*bg)
+            self._rect = RoundedRectangle(radius=[radius])
+        self.bind(pos=self._upd, size=self._upd)
+
+    def _upd(self, *a):
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+    def on_state(self, *a):
+        # تعتيم بسيط عند الضغط
+        c = self._bg
+        if self.state == "down":
+            self._col.rgba = (c[0]*0.8, c[1]*0.8, c[2]*0.8, c[3])
+        else:
+            self._col.rgba = c
 
 
 def lbl(text, **kw):
     kw = A(**kw)
-    kw.setdefault("color", (1, 1, 1, 1))
+    kw.setdefault("color", TEXT)
     return Label(text=ar(text), **kw)
 
 
 def btn(text, cb, bg=GOLD, **kw):
     kw = A(**kw)
-    kw.setdefault("color", (0, 0, 0, 1) if bg == GOLD else (1, 1, 1, 1))
-    b = Button(text=ar(text), background_normal="", background_color=bg, **kw)
+    kw.setdefault("color", (0.06, 0.06, 0.09, 1) if bg == GOLD else TEXT)
+    kw.setdefault("bold", True)
+    b = RoundButton(text=ar(text), bg=bg, **kw)
     b.bind(on_release=cb)
     return b
+
+
+def styled_input(text="", **kw):
+    kw.setdefault("multiline", False)
+    kw.setdefault("size_hint_y", None)
+    kw.setdefault("height", dp(46))
+    i = TextInput(text=text, background_normal="", background_active="",
+                  background_color=CARD2, foreground_color=TEXT,
+                  cursor_color=GOLD, padding=(dp(12), dp(12)),
+                  font_size="16sp", **kw)
+    return i
 
 
 class GoldApp(App):
@@ -221,60 +278,77 @@ class GoldApp(App):
 
     def _build_ui(self):
         self.title = "Gold Portfolio"
-        Window.clearcolor = DARK
+        Window.clearcolor = BG
         self.s = load_state()
-        root = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
+        root = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(12))
 
-        # عنوان
-        root.add_widget(lbl("محفظة الذهب 🌑", font_size="22sp", bold=True,
-                            color=GOLD, size_hint_y=None, height=dp(40)))
+        # ===== Header =====
+        header = Card(bg=CARD, radius=18, orientation="vertical",
+                      size_hint_y=None, height=dp(70), padding=(dp(16), dp(10)))
+        header.add_widget(lbl("🏆  محفظة الذهب", font_size="24sp", bold=True,
+                              color=GOLD, halign="right", valign="middle"))
+        header.add_widget(lbl("إدارة استثمار الذهب بأسعار الراجحي", font_size="12sp",
+                              color=MUTE, halign="right", valign="middle",
+                              size_hint_y=None, height=dp(18)))
+        for w in header.children:
+            w.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+        root.add_widget(header)
 
-        # أسعار الغرام (الراجحي)
-        pr = GridLayout(cols=2, size_hint_y=None, height=dp(96), spacing=dp(6))
-        pr.add_widget(lbl("سعر شراء الغرام (ريال)", font_size="13sp"))
-        self.in_buy = TextInput(text=str(self.s["buy_price"]), multiline=False,
-                                input_filter="float", size_hint_y=None, height=dp(40))
+        # ===== أسعار الغرام =====
+        pcard = Card(bg=CARD, radius=18, orientation="vertical",
+                     size_hint_y=None, height=dp(188), padding=dp(14), spacing=dp(8))
+        pcard.add_widget(lbl("أسعار الغرام (الراجحي)", font_size="14sp", bold=True,
+                             color=GOLD, halign="right", size_hint_y=None, height=dp(24)))
+        pcard.children[0].bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+        pr = GridLayout(cols=2, size_hint_y=None, height=dp(118), spacing=dp(8))
+        pr.add_widget(lbl("سعر شراء الغرام (ريال)", font_size="13sp",
+                          color=MUTE, halign="right", valign="middle"))
+        self.in_buy = styled_input(text=str(self.s["buy_price"]), input_filter="float")
         pr.add_widget(self.in_buy)
-        pr.add_widget(lbl("سعر بيع الغرام (ريال)", font_size="13sp"))
-        self.in_sell = TextInput(text=str(self.s["sell_price"]), multiline=False,
-                                 input_filter="float", size_hint_y=None, height=dp(40))
+        pr.add_widget(lbl("سعر بيع الغرام (ريال)", font_size="13sp",
+                          color=MUTE, halign="right", valign="middle"))
+        self.in_sell = styled_input(text=str(self.s["sell_price"]), input_filter="float")
         pr.add_widget(self.in_sell)
-        root.add_widget(pr)
+        for w in pr.children:
+            if isinstance(w, Label):
+                w.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+        pcard.add_widget(pr)
+        root.add_widget(pcard)
 
-        # صف العملة + تحديث
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        # ===== صف العملة + تحديث =====
+        row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
         self.cur = Spinner(text=self.s["currency"], values=list(CURRENCIES.keys()),
-                           size_hint_x=0.3, **A())
+                           size_hint_x=0.32, background_normal="", background_color=CARD2,
+                           color=TEXT, **A())
         self.cur.bind(text=lambda *a: self.refresh())
         row.add_widget(self.cur)
-        row.add_widget(btn("حفظ / تحديث السعر", self.update_price))
+        row.add_widget(btn("💾  حفظ / تحديث السعر", self.update_price))
         root.add_widget(row)
 
-        # أزرار العمليات
-        ops = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
-        ops.add_widget(btn("➕ شراء", self.open_buy, bg=GREEN, font_size="13sp"))
-        ops.add_widget(btn("➖ أمر بيع", self.open_sell, bg=RED, font_size="13sp"))
-        ops.add_widget(btn("🔔 تنبيه سعر", self.open_alert, bg=(0.3,0.3,0.4,1),
-                           color=(1,1,1,1), font_size="13sp"))
+        # ===== الملخص =====
+        self.sum_card = Card(bg=CARD2, radius=18, orientation="vertical",
+                             size_hint_y=None, height=dp(176), padding=dp(16), spacing=dp(6))
+        root.add_widget(self.sum_card)
+
+        # ===== أزرار العمليات =====
+        ops = GridLayout(cols=3, size_hint_y=None, height=dp(50), spacing=dp(8))
+        ops.add_widget(btn("➕ شراء", self.open_buy, bg=GREEN, font_size="14sp"))
+        ops.add_widget(btn("➖ أمر بيع", self.open_sell, bg=RED, font_size="14sp"))
+        ops.add_widget(btn("🔔 تنبيه", self.open_alert, bg=BLUE, font_size="14sp"))
         root.add_widget(ops)
 
-        ops2 = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
-        ops2.add_widget(btn("📜 السجل", self.open_ledger, bg=(0.3,0.3,0.4,1), font_size="13sp"))
-        ops2.add_widget(btn("📐 الزكاة", self.open_zakat, bg=(0.3,0.3,0.4,1), font_size="13sp"))
-        ops2.add_widget(btn("📈 المخطط", self.open_chart, bg=(0.3,0.3,0.4,1), font_size="13sp"))
+        ops2 = GridLayout(cols=3, size_hint_y=None, height=dp(50), spacing=dp(8))
+        ops2.add_widget(btn("📜 السجل", self.open_ledger, bg=CARD2, font_size="14sp"))
+        ops2.add_widget(btn("📐 الزكاة", self.open_zakat, bg=CARD2, font_size="14sp"))
+        ops2.add_widget(btn("📈 المخطط", self.open_chart, bg=CARD2, font_size="14sp"))
         root.add_widget(ops2)
 
-        # الملخص
-        self.summary = lbl("", font_size="14sp", size_hint_y=None, height=dp(110),
-                           halign="right", valign="top")
-        self.summary.bind(size=lambda w, *a: setattr(w, "text_size", (w.width, None)))
-        root.add_widget(self.summary)
-
-        # قائمة الدفعات
-        root.add_widget(lbl("الدفعات المتبقية:", font_size="14sp", bold=True,
-                            size_hint_y=None, height=dp(26), halign="right"))
+        # ===== قائمة الدفعات =====
+        root.add_widget(lbl("الدفعات المتبقية", font_size="15sp", bold=True, color=GOLD,
+                            size_hint_y=None, height=dp(28), halign="right"))
+        root.children[0].bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
         sc = ScrollView()
-        self.lots_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
+        self.lots_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8))
         self.lots_box.bind(minimum_height=self.lots_box.setter("height"))
         sc.add_widget(self.lots_box)
         root.add_widget(sc)
@@ -300,7 +374,9 @@ class GoldApp(App):
 
     def popup(self, title, content, size=(0.9, 0.9)):
         p = Popup(title=ar(title), content=content, size_hint=size,
-                  title_font=FONT if FONT else None)
+                  title_font=FONT if FONT else None, title_color=GOLD,
+                  title_size="17sp", separator_color=GOLD,
+                  background_color=(0, 0, 0, 0.6))
         return p
 
     def toast(self, msg):
@@ -327,40 +403,63 @@ class GoldApp(App):
         self.refresh()
 
     # ---------- تحديث الواجهة ----------
+    def _sum_row(self, label, value, color=TEXT, big=False):
+        r = BoxLayout(size_hint_y=None, height=dp(34) if not big else dp(40))
+        vl = lbl(value, font_size="18sp" if big else "15sp", bold=big, color=color,
+                 halign="left", valign="middle")
+        ll = lbl(label, font_size="13sp", color=MUTE, halign="right", valign="middle")
+        vl.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+        ll.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+        r.add_widget(vl)
+        r.add_widget(ll)
+        return r
+
     def refresh(self):
         grams = self.total_grams()
         cost = sum(l["grams"] * l["price"] for l in self.s["lots"])
         cur_val = grams * self.s["sell_price"]
         unreal = cur_val - cost
         realized = sum(e.get("profit", 0) for e in self.s["ledger"] if e["type"] == "sell")
-        txt = (
-            "الرصيد: %.3f غرام\n" % grams +
-            "تكلفة الشراء: %s\n" % self.fmt(cost) +
-            "القيمة الحالية (بيع): %s\n" % self.fmt(cur_val) +
-            "ربح/خسارة غير محقق: %s\n" % self.fmt(unreal) +
-            "ربح محقق: %s" % self.fmt(realized)
-        )
-        self.summary.text = ar(txt)
+        # بطاقة الملخص
+        self.sum_card.clear_widgets()
+        self.sum_card.add_widget(self._sum_row("الرصيد", "%.3f غرام" % grams,
+                                               color=GOLD, big=True))
+        self.sum_card.add_widget(self._sum_row("تكلفة الشراء", self.fmt(cost)))
+        self.sum_card.add_widget(self._sum_row("القيمة الحالية (بيع)", self.fmt(cur_val)))
+        self.sum_card.add_widget(self._sum_row("ربح/خسارة غير محقق", self.fmt(unreal),
+                                               color=GREEN if unreal >= 0 else RED))
+        self.sum_card.add_widget(self._sum_row("ربح محقق", self.fmt(realized),
+                                               color=GREEN if realized >= 0 else RED))
         # الدفعات
         self.lots_box.clear_widgets()
         if not self.s["lots"]:
-            self.lots_box.add_widget(lbl("لا توجد دفعات", size_hint_y=None,
-                                         height=dp(30), color=(0.7,0.7,0.7,1)))
+            empty = Card(bg=CARD, radius=14, size_hint_y=None, height=dp(44),
+                         padding=dp(10))
+            empty.add_widget(lbl("لا توجد دفعات", color=MUTE, halign="center",
+                                 valign="middle"))
+            self.lots_box.add_widget(empty)
         for i, l in enumerate(self.s["lots"]):
-            t = "%s | %.3fغ @ %.2f ريال" % (l.get("date", ""), l["grams"], l["price"])
-            self.lots_box.add_widget(lbl(t, size_hint_y=None, height=dp(30),
-                                         halign="right", font_size="13sp"))
+            c = Card(bg=CARD, radius=14, size_hint_y=None, height=dp(52),
+                     padding=(dp(14), dp(6)))
+            g = lbl("%.3f غرام" % l["grams"], font_size="15sp", bold=True,
+                    color=GOLD, halign="left", valign="middle")
+            d = lbl("%s  •  @ %.2f ريال" % (l.get("date", ""), l["price"]),
+                    font_size="12sp", color=MUTE, halign="right", valign="middle")
+            g.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+            d.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+            c.add_widget(g)
+            c.add_widget(d)
+            self.lots_box.add_widget(c)
 
     # ---------- شراء ----------
     def open_buy(self, *a):
         bx = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
         bx.add_widget(lbl("الكمية (غرام):", halign="right", size_hint_y=None, height=dp(26)))
-        g = TextInput(multiline=False, input_filter="float", size_hint_y=None, height=dp(44))
+        g = styled_input(input_filter="float")
         bx.add_widget(g)
         bx.add_widget(lbl("سعر الشراء للغرام (ريال):", halign="right",
                           size_hint_y=None, height=dp(26)))
-        pr = TextInput(text=str(self.s["buy_price"]), multiline=False,
-                       input_filter="float", size_hint_y=None, height=dp(44))
+        pr = styled_input(text=str(self.s["buy_price"]), input_filter="float")
         bx.add_widget(pr)
         p = self.popup("➕ شراء ذهب", bx, size=(0.9, 0.6))
 
@@ -385,12 +484,11 @@ class GoldApp(App):
                           halign="right", size_hint_y=None, height=dp(26)))
         bx.add_widget(lbl("الكمية المراد بيعها (غرام):", halign="right",
                           size_hint_y=None, height=dp(26)))
-        g = TextInput(multiline=False, input_filter="float", size_hint_y=None, height=dp(44))
+        g = styled_input(input_filter="float")
         bx.add_widget(g)
         bx.add_widget(lbl("سعر البيع للغرام (الراجحي - ريال):", halign="right",
                           size_hint_y=None, height=dp(26)))
-        pr = TextInput(text=str(self.s["sell_price"]), multiline=False,
-                       input_filter="float", size_hint_y=None, height=dp(44))
+        pr = styled_input(text=str(self.s["sell_price"]), input_filter="float")
         bx.add_widget(pr)
         p = self.popup("➖ أمر بيع", bx, size=(0.9, 0.7))
 
@@ -429,8 +527,7 @@ class GoldApp(App):
         bx = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
         bx.add_widget(lbl("نبّهني عندما يبلغ سعر البيع (ريال):", halign="right",
                           size_hint_y=None, height=dp(26)))
-        v = TextInput(text=str(self.s.get("alert_price", 0)), multiline=False,
-                      input_filter="float", size_hint_y=None, height=dp(44))
+        v = styled_input(text=str(self.s.get("alert_price", 0)), input_filter="float")
         bx.add_widget(v)
         p = self.popup("🔔 تنبيه سعر", bx, size=(0.85, 0.5))
 
@@ -446,21 +543,27 @@ class GoldApp(App):
     def open_ledger(self, *a):
         bx = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(6))
         sc = ScrollView()
-        box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(3))
+        box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(6))
         box.bind(minimum_height=box.setter("height"))
         if not self.s["ledger"]:
-            box.add_widget(lbl("السجل فارغ", size_hint_y=None, height=dp(30)))
+            box.add_widget(lbl("السجل فارغ", size_hint_y=None, height=dp(30), color=MUTE))
         for e in reversed(self.s["ledger"]):
             if e["type"] == "buy":
                 t = "➕ شراء | %s | %.3fغ @ %.2f = %.2f" % (
                     e["date"], e["grams"], e["price"], e["value"])
-                c = (0.8, 0.8, 0.8, 1)
+                c = TEXT
+                bg = CARD
             else:
                 t = "➖ بيع | %s | %.3fغ @ %.2f | ربح: %.2f" % (
                     e["date"], e["grams"], e["price"], e.get("profit", 0))
                 c = GREEN if e.get("profit", 0) >= 0 else RED
-            box.add_widget(lbl(t, size_hint_y=None, height=dp(30), halign="right",
-                               font_size="12sp", color=c))
+                bg = CARD2
+            card = Card(bg=bg, radius=12, size_hint_y=None, height=dp(42),
+                        padding=(dp(12), dp(4)))
+            il = lbl(t, halign="right", valign="middle", font_size="12sp", color=c)
+            il.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
+            card.add_widget(il)
+            box.add_widget(card)
         sc.add_widget(box)
         bx.add_widget(sc)
         p = self.popup("📜 سجل العمليات", bx)
@@ -482,7 +585,8 @@ class GoldApp(App):
         value = grams * self.s["sell_price"]
         nisab_g = 85.0
         zakat = value * 0.025 if grams >= nisab_g else 0.0
-        bx = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(8))
+        bx = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
+        card = Card(bg=CARD2, radius=16, orientation="vertical", padding=dp(16))
         txt = (
             "الرصيد: %.3f غرام\n" % grams +
             "النصاب: %.0f غرام\n" % nisab_g +
@@ -491,9 +595,10 @@ class GoldApp(App):
              if grams >= nisab_g else
              "لم يبلغ النصاب — لا زكاة")
         )
-        l = lbl(txt, halign="right", valign="top", font_size="15sp")
+        l = lbl(txt, halign="right", valign="top", font_size="16sp", color=TEXT)
         l.bind(size=lambda w, *x: setattr(w, "text_size", (w.width, None)))
-        bx.add_widget(l)
+        card.add_widget(l)
+        bx.add_widget(card)
         p = self.popup("📐 حاسبة الزكاة", bx, size=(0.85, 0.6))
         bx.add_widget(btn("إغلاق", lambda *_: p.dismiss()))
         p.open()
