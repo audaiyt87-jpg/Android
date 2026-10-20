@@ -10,6 +10,9 @@ Gold Portfolio - Android version (Kivy)
 import os
 import json
 import time
+import ssl
+import threading
+import urllib.request
 from datetime import datetime
 
 from kivy.app import App
@@ -280,7 +283,12 @@ class GoldApp(App):
         self.title = "Gold Portfolio"
         Window.clearcolor = BG
         self.s = load_state()
-        root = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(12))
+        # الصفحة بأكملها قابلة للتمرير لكي تظهر الواجهة كاملة
+        root = ScrollView(do_scroll_x=False, bar_width=dp(4))
+        col = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(12),
+                        size_hint_y=None)
+        col.bind(minimum_height=col.setter("height"))
+        root.add_widget(col)
 
         # ===== Header =====
         header = Card(bg=CARD, radius=18, orientation="vertical",
@@ -292,11 +300,11 @@ class GoldApp(App):
                               size_hint_y=None, height=dp(18)))
         for w in header.children:
             w.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
-        root.add_widget(header)
+        col.add_widget(header)
 
         # ===== أسعار الغرام =====
         pcard = Card(bg=CARD, radius=18, orientation="vertical",
-                     size_hint_y=None, height=dp(188), padding=dp(14), spacing=dp(8))
+                     size_hint_y=None, height=dp(228), padding=dp(14), spacing=dp(8))
         pcard.add_widget(lbl("أسعار الغرام (الراجحي)", font_size="14sp", bold=True,
                              color=GOLD, halign="right", size_hint_y=None, height=dp(24)))
         pcard.children[0].bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
@@ -313,7 +321,12 @@ class GoldApp(App):
             if isinstance(w, Label):
                 w.bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
         pcard.add_widget(pr)
-        root.add_widget(pcard)
+        # زر جلب السعر اللحظي من الإنترنت
+        self.live_btn = btn("🌐  جلب السعر اللحظي من الإنترنت",
+                            self.fetch_live_price, bg=GOLD_D, color=TEXT,
+                            size_hint_y=None, height=dp(44), font_size="13sp")
+        pcard.add_widget(self.live_btn)
+        col.add_widget(pcard)
 
         # ===== صف العملة + تحديث =====
         row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
@@ -323,37 +336,37 @@ class GoldApp(App):
         self.cur.bind(text=lambda *a: self.refresh())
         row.add_widget(self.cur)
         row.add_widget(btn("💾  حفظ / تحديث السعر", self.update_price))
-        root.add_widget(row)
+        col.add_widget(row)
 
         # ===== الملخص =====
         self.sum_card = Card(bg=CARD2, radius=18, orientation="vertical",
                              size_hint_y=None, height=dp(176), padding=dp(16), spacing=dp(6))
-        root.add_widget(self.sum_card)
+        col.add_widget(self.sum_card)
 
         # ===== أزرار العمليات =====
         ops = GridLayout(cols=3, size_hint_y=None, height=dp(50), spacing=dp(8))
         ops.add_widget(btn("➕ شراء", self.open_buy, bg=GREEN, font_size="14sp"))
         ops.add_widget(btn("➖ أمر بيع", self.open_sell, bg=RED, font_size="14sp"))
         ops.add_widget(btn("🔔 تنبيه", self.open_alert, bg=BLUE, font_size="14sp"))
-        root.add_widget(ops)
+        col.add_widget(ops)
 
         ops2 = GridLayout(cols=3, size_hint_y=None, height=dp(50), spacing=dp(8))
         ops2.add_widget(btn("📜 السجل", self.open_ledger, bg=CARD2, font_size="14sp"))
         ops2.add_widget(btn("📐 الزكاة", self.open_zakat, bg=CARD2, font_size="14sp"))
         ops2.add_widget(btn("📈 المخطط", self.open_chart, bg=CARD2, font_size="14sp"))
-        root.add_widget(ops2)
+        col.add_widget(ops2)
 
         # ===== قائمة الدفعات =====
-        root.add_widget(lbl("الدفعات المتبقية", font_size="15sp", bold=True, color=GOLD,
-                            size_hint_y=None, height=dp(28), halign="right"))
-        root.children[0].bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
-        sc = ScrollView()
+        col.add_widget(lbl("الدفعات المتبقية", font_size="15sp", bold=True, color=GOLD,
+                           size_hint_y=None, height=dp(28), halign="right"))
+        col.children[0].bind(size=lambda x, *a: setattr(x, "text_size", (x.width, None)))
         self.lots_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(8))
         self.lots_box.bind(minimum_height=self.lots_box.setter("height"))
-        sc.add_widget(self.lots_box)
-        root.add_widget(sc)
+        col.add_widget(self.lots_box)
 
         self.refresh()
+        # جلب السعر اللحظي تلقائياً عند بدء التشغيل (صامت)
+        Clock.schedule_once(lambda dt: self.fetch_live_price(silent=True), 1.0)
         return root
 
     # ---------- أدوات ----------
@@ -385,6 +398,63 @@ class GoldApp(App):
         p = self.popup("تنبيه", bx, size=(0.8, 0.4))
         bx.add_widget(btn("حسناً", lambda *a: p.dismiss()))
         p.open()
+
+    # ---------- السعر اللحظي من الإنترنت ----------
+    def fetch_live_price(self, *a, **kw):
+        """جلب سعر الذهب اللحظي (سبوت) وتعبئة حقلي السعر — في خيط منفصل."""
+        self._silent = bool(kw.get("silent", False))
+        try:
+            self.live_btn.text = ar("… جارٍ جلب السعر")
+        except Exception:
+            pass
+        threading.Thread(target=self._fetch_worker, daemon=True).start()
+
+    def _fetch_worker(self):
+        err = None
+        gram_sar = 0.0
+        url = "https://api.gold-api.com/price/XAU"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        raw = None
+        # محاولة عادية ثم سياق SSL غير متحقق (لبيانات عامة غير حساسة)
+        try:
+            raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8")
+        except Exception:
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                raw = urllib.request.urlopen(req, timeout=20, context=ctx).read().decode("utf-8")
+            except Exception as e:
+                err = str(e)
+        if raw is not None:
+            try:
+                data = json.loads(raw)
+                usd_per_oz = float(data.get("price", 0))
+                if usd_per_oz <= 0:
+                    raise ValueError("no price")
+                # أونصة → غرام (31.1035) ثم USD → SAR (1/0.2667 ≈ 3.75)
+                usd_per_gram = usd_per_oz / 31.1035
+                gram_sar = usd_per_gram / CURRENCIES["USD"]
+            except Exception as e:
+                err = str(e)
+        Clock.schedule_once(lambda dt: self._apply_live_price(gram_sar, err), 0)
+
+    def _apply_live_price(self, gram_sar, err):
+        try:
+            self.live_btn.text = ar("🌐  جلب السعر اللحظي من الإنترنت")
+        except Exception:
+            pass
+        if err or gram_sar <= 0:
+            if getattr(self, "_silent", False):
+                return
+            return self.toast("تعذّر جلب السعر — تأكد من اتصال الإنترنت")
+        # سعر السبوت 24 قيراطاً (تقريبي) — يمكن تعديله يدوياً لسعر الراجحي
+        val = round(gram_sar, 2)
+        self.in_buy.text = str(val)
+        self.in_sell.text = str(val)
+        self.update_price()
+        if not getattr(self, "_silent", False):
+            self.toast("تم تحديث السعر اللحظي: %.2f ريال/غرام (سبوت 24ق)" % val)
 
     # ---------- السعر ----------
     def update_price(self, *a):

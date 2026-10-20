@@ -15,7 +15,7 @@ source.include_exts = py,png,jpg,ttf,json
 version = 1.0
 
 # المتطلبات (نسخ متوافقة مع Python 3.11)
-requirements = python3,kivy==2.3.0,arabic_reshaper,python-bidi==0.4.2
+requirements = python3,kivy==2.3.0,openssl,arabic_reshaper,python-bidi==0.4.2
 
 # الاتجاه
 orientation = portrait
